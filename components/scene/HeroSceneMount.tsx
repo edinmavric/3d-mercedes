@@ -1,26 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useIsMobile } from "@/hooks/useIsMobile";
-import { useSectionInView } from "@/hooks/useInView";
 
 const HeroScene = dynamic(
   () => import("./HeroScene").then((m) => m.HeroScene),
   { ssr: false }
 );
 
+// Always-mounted on both desktop and mobile. The canvas uses frameloop="demand"
+// so it doesn't burn GPU while idle. State (car rotation/position) is preserved
+// across scroll regardless of viewport visibility, so the car never "disappears"
+// or "resets" when scrolling past section 2 and back.
 export function HeroSceneMount() {
-  const isMobile = useIsMobile();
-  // Mount the car canvas while either hero or scene section is anywhere near
-  // the viewport. Unmount once we've scrolled well past — frees the WebGL
-  // context and stops the render loop.
-  const heroNear = useSectionInView('[data-scroll-section="hero"]', "400px 0px");
-  const sceneNear = useSectionInView(
-    '[data-scroll-section="scene"]',
-    "400px 0px"
-  );
-
-  if (isMobile) return null;
-  if (!heroNear && !sceneNear) return null;
   return <HeroScene />;
 }

@@ -1,27 +1,114 @@
 "use client";
 
-import { Suspense, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { ContactShadows, PerspectiveCamera } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { ContactShadows, OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import { CarModel, CarFallback } from "./CarModel";
 import { Lighting } from "./Lighting";
 import { SceneErrorBoundary } from "./SceneErrorBoundary";
 import { scrollState } from "@/lib/scrollState";
 
-function ScrollCamera() {
+// Settle point: when section 2 has fully filled the viewport — corresponds
+// to the "PREVUCITE ZA INTERAKCIJU" composition. ScrollTrigger maps this
+// moment to scene-progress ≈ 0.5.
+const SETTLED_THRESHOLD = 0.48;
+// Drag-to-rotate is enabled only while the canvas is still effectively
+// stationary at the rest pose. Past this point the canvas slides upward
+// with the page so dragging would conflict with scrolling.
+const INTERACT_MAX_SCENE = 0.55;
+
+// Map scrollState.scene 0→0.5 to phase 0→1 (and clamp ≥0.5 to 1).
+function carPhase() {
+  const heroPart = THREE.MathUtils.clamp(scrollState.hero, 0, 1);
+  const scenePart = THREE.MathUtils.clamp(scrollState.scene / 0.5, 0, 1);
+  return THREE.MathUtils.clamp(heroPart * 0.3 + scenePart * 0.85, 0, 1);
+}
+
+function getCameraTargets(width: number, height: number) {
+  const aspect = width / Math.max(1, height);
+  // Smoothly pull the camera back as the viewport narrows so the car keeps
+  // fitting horizontally on portrait phones / small tablets. Landscape
+  // (aspect ≥ ~1.6) gets pullback = 1, i.e. the original framing.
+  const pullback = Math.min(
+    3.5,
+    Math.max(1, 1.6 / Math.max(aspect, 0.3))
+  );
+  const isPortrait = aspect < 1;
+  return {
+    zStart: 7.4 * pullback,
+    zEnd: 5.6 * pullback,
+    yStart: isPortrait ? 1.55 : 1.35,
+    yEnd: isPortrait ? 1.05 : 0.95,
+  };
+}
+
+type CamState = "scroll" | "catching-up" | "frozen";
+
+function ScrollCamera({
+  settleSignal,
+  onFrozen,
+}: {
+  settleSignal: boolean;
+  onFrozen: (b: boolean) => void;
+}) {
   const camRef = useRef<THREE.PerspectiveCamera>(null);
+  const { size, invalidate } = useThree();
+  const stateRef = useRef<CamState>("scroll");
+
+  // Sync the external settle flag with the internal state machine. The
+  // "catching-up" phase lets the camera smoothly damp to the final pose even
+  // when the user blew past the trigger zone in one fast scroll.
+  useEffect(() => {
+    if (!settleSignal) {
+      if (stateRef.current !== "scroll") {
+        stateRef.current = "scroll";
+        onFrozen(false);
+        invalidate();
+      }
+    } else if (stateRef.current === "scroll") {
+      stateRef.current = "catching-up";
+      invalidate();
+    }
+  }, [settleSignal, onFrozen, invalidate]);
 
   useFrame((_s, delta) => {
     const cam = camRef.current;
     if (!cam) return;
-    const p = scrollState.hero * 0.4 + scrollState.scene * 0.6;
-    const targetZ = THREE.MathUtils.lerp(7.2, 5.4, p);
-    const targetY = THREE.MathUtils.lerp(1.35, 0.95, p);
+    const state = stateRef.current;
+    if (state === "frozen") return;
+
+    const t = getCameraTargets(size.width, size.height);
+    let targetZ: number;
+    let targetY: number;
+
+    if (state === "scroll") {
+      const p = carPhase();
+      targetZ = THREE.MathUtils.lerp(t.zStart, t.zEnd, p);
+      targetY = THREE.MathUtils.lerp(t.yStart, t.yEnd, p);
+    } else {
+      // catching-up — target is the final pose regardless of current scroll.
+      targetZ = t.zEnd;
+      targetY = t.yEnd;
+    }
+
+    cam.position.x = THREE.MathUtils.damp(cam.position.x, 0, 3, delta);
     cam.position.z = THREE.MathUtils.damp(cam.position.z, targetZ, 3, delta);
     cam.position.y = THREE.MathUtils.damp(cam.position.y, targetY, 3, delta);
     cam.lookAt(0, 0.4, 0);
+
+    if (state === "catching-up") {
+      const dx = Math.abs(cam.position.x);
+      const dz = Math.abs(cam.position.z - targetZ);
+      const dy = Math.abs(cam.position.y - targetY);
+      if (dx < 0.005 && dz < 0.005 && dy < 0.005) {
+        stateRef.current = "frozen";
+        onFrozen(true);
+      } else {
+        invalidate();
+      }
+    }
   });
 
   return (
@@ -31,9 +118,46 @@ function ScrollCamera() {
       fov={32}
       near={0.1}
       far={50}
-      position={[0, 1.35, 7.2]}
+      position={[0, 1.35, 9.5]}
     />
   );
+}
+
+// Demand-mode renderer needs explicit invalidation. Scroll, resize, and a few
+// frames after each scroll burst (so damp() can settle) trigger redraws.
+// OrbitControls calls invalidate() internally on drag.
+function ScrollInvalidator() {
+  const invalidate = useThree((s) => s.invalidate);
+
+  useEffect(() => {
+    let raf = 0;
+    let framesLeft = 0;
+
+    const pump = () => {
+      invalidate();
+      if (framesLeft-- > 0) {
+        raf = requestAnimationFrame(pump);
+      }
+    };
+
+    const wake = () => {
+      framesLeft = 45;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(pump);
+    };
+
+    window.addEventListener("scroll", wake, { passive: true });
+    window.addEventListener("resize", wake);
+    wake();
+
+    return () => {
+      window.removeEventListener("scroll", wake);
+      window.removeEventListener("resize", wake);
+      cancelAnimationFrame(raf);
+    };
+  }, [invalidate]);
+
+  return null;
 }
 
 export function HeroScene() {
@@ -41,36 +165,126 @@ export function HeroScene() {
     typeof document !== "undefined"
       ? document.getElementById("canvas-root")
       : null;
+  const [settled, setSettled] = useState(false);
+  const [frozen, setFrozen] = useState(false);
+  const [withinInteractWindow, setWithinInteractWindow] = useState(false);
+  const rootRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = document.getElementById("canvas-root");
+    rootRef.current = root;
+    let lastSettled = false;
+    let lastInteract = false;
+
+    const apply = () => {
+      // From settle to the end of section 2, slide the canvas up with the
+      // page so the car visually stays pinned at its rest position and then
+      // scrolls off — rather than persisting fixed across every following
+      // section. (1 unit of scene progress past 0.5 maps to ~100vh of page
+      // scroll for a 100vh section, so this offset moves at exactly the
+      // page's scroll speed.)
+      if (root) {
+        const past = Math.max(0, Math.min(1, (scrollState.scene - 0.5) * 2));
+        root.style.transform =
+          past > 0 ? `translate3d(0, ${(-past * 100).toFixed(2)}vh, 0)` : "";
+      }
+
+      const nextSettled = scrollState.scene >= SETTLED_THRESHOLD;
+      const nextInteract =
+        scrollState.scene >= SETTLED_THRESHOLD &&
+        scrollState.scene <= INTERACT_MAX_SCENE;
+      if (nextSettled !== lastSettled) {
+        lastSettled = nextSettled;
+        setSettled(nextSettled);
+      }
+      if (nextInteract !== lastInteract) {
+        lastInteract = nextInteract;
+        setWithinInteractWindow(nextInteract);
+      }
+    };
+
+    window.addEventListener("scroll", apply, { passive: true });
+    apply();
+    return () => {
+      window.removeEventListener("scroll", apply);
+      if (root) root.style.transform = "";
+    };
+  }, []);
 
   if (!mount) return null;
 
+  // Drag-to-rotate is only valid once the camera has fully caught up AND we
+  // are still in the narrow window where the canvas is at rest.
+  const interactable = frozen && withinInteractWindow;
+
   return createPortal(
-    <Canvas
-      dpr={[1, 1.5]}
-      gl={{
-        antialias: true,
-        powerPreference: "high-performance",
-        toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.05,
-      }}
-      shadows={false}
-      style={{ width: "100%", height: "100%", pointerEvents: "none" }}
-    >
-      <ScrollCamera />
-      <Suspense fallback={null}>
-        <Lighting />
-        <SceneErrorBoundary label="CarModel" fallback={<CarFallback />}>
-          <CarModel />
-        </SceneErrorBoundary>
-        <ContactShadows
-          position={[0, -0.005, 0]}
-          opacity={0.55}
-          scale={10}
-          blur={2.4}
-          far={3}
+    <>
+      <Canvas
+        dpr={[1, 1.5]}
+        frameloop="demand"
+        gl={{
+          antialias: true,
+          powerPreference: "high-performance",
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.05,
+        }}
+        shadows={false}
+        style={{
+          width: "100%",
+          height: "100%",
+          pointerEvents: interactable ? "auto" : "none",
+          touchAction: "pan-y",
+        }}
+      >
+        <ScrollInvalidator />
+        <ScrollCamera settleSignal={settled} onFrozen={setFrozen} />
+        <Suspense fallback={null}>
+          <Lighting />
+          <SceneErrorBoundary label="CarModel" fallback={<CarFallback />}>
+            <CarModel manualControl={settled} />
+          </SceneErrorBoundary>
+          <ContactShadows
+            position={[0, -0.005, 0]}
+            opacity={0.55}
+            scale={10}
+            blur={2.4}
+            far={3}
+          />
+        </Suspense>
+        <OrbitControls
+          makeDefault
+          enabled={interactable}
+          enableZoom={false}
+          enablePan={false}
+          rotateSpeed={0.55}
+          minPolarAngle={Math.PI / 2.45}
+          maxPolarAngle={Math.PI / 2.05}
+          target={[0, 0.4, 0]}
         />
-      </Suspense>
-    </Canvas>,
+      </Canvas>
+      <SettledHint visible={interactable} />
+    </>,
     mount
+  );
+}
+
+function SettledHint({ visible }: { visible: boolean }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "fixed",
+        left: "50%",
+        bottom: "13vh",
+        transform: "translateX(-50%)",
+        pointerEvents: "none",
+        opacity: visible ? 1 : 0,
+        transition: "opacity 0.6s ease",
+        zIndex: 15,
+      }}
+      className="font-display text-[10px] tracking-ultra uppercase text-paper/80"
+    >
+      Prevucite za rotaciju
+    </div>
   );
 }
