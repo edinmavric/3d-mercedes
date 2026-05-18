@@ -2,7 +2,7 @@ export function ScenePin() {
   return (
     <section
       data-scroll-section="scene"
-      className="relative h-screen w-full overflow-hidden"
+      className="relative h-[65vh] md:h-screen w-full overflow-hidden pointer-events-none"
     >
       <div className="absolute inset-0 z-10 pointer-events-none">
         <div className="absolute top-10 left-0 right-0 px-8 lg:px-12">

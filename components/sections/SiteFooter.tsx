@@ -116,7 +116,7 @@ export function SiteFooter() {
             </div>
           </div>
 
-          <ul className="flex items-center gap-8 text-[10px] tracking-wider2 uppercase text-mute">
+          <ul className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:gap-8 text-[10px] tracking-wider2 uppercase text-mute">
             <li>
               <a href="#" className="hover:text-paper transition-colors">
                 Politika privatnosti

@@ -10,14 +10,23 @@ import { Lighting } from "./Lighting";
 import { SceneErrorBoundary } from "./SceneErrorBoundary";
 import { scrollState } from "@/lib/scrollState";
 
+// Toggle to silence the rotation-debug instrumentation.
+const DEBUG_ROTATION = false;
+const dlog = (...args: unknown[]) => {
+  if (DEBUG_ROTATION) console.log("[HeroScene]", ...args);
+};
+
 // Settle point: when section 2 has fully filled the viewport — corresponds
 // to the "PREVUCITE ZA INTERAKCIJU" composition. ScrollTrigger maps this
 // moment to scene-progress ≈ 0.5.
 const SETTLED_THRESHOLD = 0.48;
-// Drag-to-rotate is enabled only while the canvas is still effectively
-// stationary at the rest pose. Past this point the canvas slides upward
-// with the page so dragging would conflict with scrolling.
-const INTERACT_MAX_SCENE = 0.55;
+// Drag-to-rotate stays enabled while the car is still on-screen. The canvas
+// begins sliding up at scene ≥ 0.5 (see apply() — `past = (scene - 0.5) * 2`)
+// and is fully off-screen at scene = 1.0. `touch-action: pan-y` on the canvas
+// means vertical drags pass through to the page scroll, so leaving rotation
+// enabled across the visible range doesn't trap the user. We close the window
+// just before the canvas finishes leaving the viewport.
+const INTERACT_MAX_SCENE = 0.9;
 
 // Map scrollState.scene 0→0.5 to phase 0→1 (and clamp ≥0.5 to 1).
 function carPhase() {
@@ -63,11 +72,13 @@ function ScrollCamera({
   useEffect(() => {
     if (!settleSignal) {
       if (stateRef.current !== "scroll") {
+        dlog("camState: → scroll (settleSignal=false)");
         stateRef.current = "scroll";
         onFrozen(false);
         invalidate();
       }
     } else if (stateRef.current === "scroll") {
+      dlog("camState: scroll → catching-up");
       stateRef.current = "catching-up";
       invalidate();
     }
@@ -96,13 +107,16 @@ function ScrollCamera({
     cam.position.x = THREE.MathUtils.damp(cam.position.x, 0, 3, delta);
     cam.position.z = THREE.MathUtils.damp(cam.position.z, targetZ, 3, delta);
     cam.position.y = THREE.MathUtils.damp(cam.position.y, targetY, 3, delta);
-    cam.lookAt(0, 0.4, 0);
+    cam.lookAt(0, 0.7, 0);
 
     if (state === "catching-up") {
       const dx = Math.abs(cam.position.x);
       const dz = Math.abs(cam.position.z - targetZ);
       const dy = Math.abs(cam.position.y - targetY);
       if (dx < 0.005 && dz < 0.005 && dy < 0.005) {
+        dlog("camState: catching-up → frozen", {
+          camPos: [cam.position.x.toFixed(3), cam.position.y.toFixed(3), cam.position.z.toFixed(3)],
+        });
         stateRef.current = "frozen";
         onFrozen(true);
       } else {
@@ -121,6 +135,39 @@ function ScrollCamera({
       position={[0, 1.35, 9.5]}
     />
   );
+}
+
+// Diagnostic: log every pointerdown on the WebGL canvas + the computed
+// pointer-events CSS so we know whether the canvas is actually grabbable when
+// the user reports "I can't rotate".
+function CanvasProbe() {
+  const { gl } = useThree();
+  useEffect(() => {
+    const el = gl.domElement;
+    const onDown = (e: PointerEvent) => {
+      const cs = getComputedStyle(el);
+      dlog("canvas pointerdown", {
+        pointerType: e.pointerType,
+        button: e.button,
+        target: (e.target as Element)?.tagName,
+        canvasPointerEvents: cs.pointerEvents,
+        canvasTouchAction: cs.touchAction,
+        canvasRect: el.getBoundingClientRect().toJSON(),
+      });
+    };
+    const onParentDown = (e: PointerEvent) => {
+      dlog("canvas-root pointerdown (parent) target=", (e.target as Element)?.tagName);
+    };
+    el.addEventListener("pointerdown", onDown, true);
+    const parent = document.getElementById("canvas-root");
+    parent?.addEventListener("pointerdown", onParentDown, true);
+    dlog("CanvasProbe attached. canvas computed pointer-events=", getComputedStyle(el).pointerEvents);
+    return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      parent?.removeEventListener("pointerdown", onParentDown, true);
+    };
+  }, [gl]);
+  return null;
 }
 
 // Demand-mode renderer needs explicit invalidation. Scroll, resize, and a few
@@ -175,18 +222,23 @@ export function HeroScene() {
     rootRef.current = root;
     let lastSettled = false;
     let lastInteract = false;
+    let applyCount = 0;
+    let lastLoggedScene = -1;
 
     const apply = () => {
-      // From settle to the end of section 2, slide the canvas up with the
-      // page so the car visually stays pinned at its rest position and then
-      // scrolls off — rather than persisting fixed across every following
-      // section. (1 unit of scene progress past 0.5 maps to ~100vh of page
-      // scroll for a 100vh section, so this offset moves at exactly the
-      // page's scroll speed.)
+      applyCount += 1;
       if (root) {
         const past = Math.max(0, Math.min(1, (scrollState.scene - 0.5) * 2));
         root.style.transform =
           past > 0 ? `translate3d(0, ${(-past * 100).toFixed(2)}vh, 0)` : "";
+        // Lift canvas-root above <main> once the car has settled so taps
+        // actually land on the WebGL canvas. Globally it sits at z:0 so Hero
+        // typography paints in front of the car during the intro. While
+        // settled, the car is the focus — putting it on top is visually fine
+        // (canvas is transparent except the car) and is the only way touch
+        // events reach OrbitControls. EngineReveal (z-20) still covers it
+        // when it scrolls in.
+        root.style.zIndex = scrollState.scene >= SETTLED_THRESHOLD ? "15" : "";
       }
 
       const nextSettled = scrollState.scene >= SETTLED_THRESHOLD;
@@ -195,19 +247,36 @@ export function HeroScene() {
         scrollState.scene <= INTERACT_MAX_SCENE;
       if (nextSettled !== lastSettled) {
         lastSettled = nextSettled;
+        dlog("settled →", nextSettled, "(scene=", scrollState.scene.toFixed(3), ")");
         setSettled(nextSettled);
       }
       if (nextInteract !== lastInteract) {
         lastInteract = nextInteract;
+        dlog("withinInteractWindow →", nextInteract, "(scene=", scrollState.scene.toFixed(3), ")");
         setWithinInteractWindow(nextInteract);
+      }
+      // Periodic scene snapshot so we can see whether apply() is even firing
+      // while the user is at the settle position (Lenis smooth-scroll vs
+      // native scroll event timing).
+      if (Math.abs(scrollState.scene - lastLoggedScene) > 0.02) {
+        lastLoggedScene = scrollState.scene;
+        dlog("apply() scene=", scrollState.scene.toFixed(3), "settled=", nextSettled, "interact=", nextInteract, "callCount=", applyCount);
       }
     };
 
     window.addEventListener("scroll", apply, { passive: true });
+    // Fallback poll: if Lenis suppresses native scroll events the React state
+    // won't follow scrollState.scene. A 60Hz poll guarantees apply() runs.
+    const pollId = window.setInterval(apply, 16);
     apply();
+    dlog("mounted — listeners attached, initial scene=", scrollState.scene.toFixed(3));
     return () => {
       window.removeEventListener("scroll", apply);
-      if (root) root.style.transform = "";
+      window.clearInterval(pollId);
+      if (root) {
+        root.style.transform = "";
+        root.style.zIndex = "";
+      }
     };
   }, []);
 
@@ -216,6 +285,9 @@ export function HeroScene() {
   // Drag-to-rotate is only valid once the camera has fully caught up AND we
   // are still in the narrow window where the canvas is at rest.
   const interactable = frozen && withinInteractWindow;
+  if (DEBUG_ROTATION) {
+    dlog("render — settled=", settled, "frozen=", frozen, "withinInteractWindow=", withinInteractWindow, "→ interactable=", interactable);
+  }
 
   return createPortal(
     <>
@@ -237,6 +309,7 @@ export function HeroScene() {
         }}
       >
         <ScrollInvalidator />
+        <CanvasProbe />
         <ScrollCamera settleSignal={settled} onFrozen={setFrozen} />
         <Suspense fallback={null}>
           <Lighting />
@@ -259,7 +332,10 @@ export function HeroScene() {
           rotateSpeed={0.55}
           minPolarAngle={Math.PI / 2.45}
           maxPolarAngle={Math.PI / 2.05}
-          target={[0, 0.4, 0]}
+          target={[0, 0.7, 0]}
+          onStart={() => dlog("OrbitControls onStart — drag began")}
+          onChange={() => dlog("OrbitControls onChange — camera rotating")}
+          onEnd={() => dlog("OrbitControls onEnd — drag ended")}
         />
       </Canvas>
       <SettledHint visible={interactable} />

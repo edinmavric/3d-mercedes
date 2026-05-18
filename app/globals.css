@@ -23,6 +23,14 @@ body {
   color: #f5f5f5;
 }
 
+/* Safety net: clip any residual sub-pixel horizontal overflow without
+   creating a new scroll container — `clip` (unlike `hidden`) preserves
+   position: fixed anchoring to the viewport, which matters for #canvas-root
+   and the fixed Nav. All real layout fits at device-width on its own. */
+html {
+  overflow-x: clip;
+}
+
 body {
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

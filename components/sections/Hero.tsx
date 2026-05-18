@@ -25,7 +25,7 @@ export function Hero() {
             <span className="h-px flex-1 chrome-rule opacity-70" />
           </div>
 
-          <h1 className="font-display font-light leading-[0.92] tracking-[-0.02em] text-[18vw] md:text-[14vw] lg:text-[11.5vw] chrome-text">
+          <h1 className="font-display font-light leading-[0.92] tracking-[-0.02em] text-[clamp(2.5rem,13vw,14rem)] chrome-text">
             Inženjerska
             <br />
             perfekcija.
@@ -41,18 +41,18 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="max-w-[1600px] mx-auto w-full px-8 lg:px-12 pb-10 flex items-end justify-between">
+      <div className="max-w-[1600px] mx-auto w-full px-8 lg:px-12 pb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="text-[11px] tracking-wider2 uppercase text-mute leading-relaxed">
           <div>Salon &amp; ovlašćeni servis</div>
           <div className="text-paper/70 mt-1">Od 1998.</div>
         </div>
 
-        <div className="flex flex-col items-center gap-4 text-mute">
+        <div className="hidden sm:flex flex-col items-center gap-4 text-mute">
           <span className="text-[10px] tracking-ultra uppercase">Skroluj</span>
           <div className="relative w-px h-16 bg-line scroll-drip" />
         </div>
 
-        <div className="text-right text-[11px] tracking-wider2 uppercase text-mute leading-relaxed">
+        <div className="sm:text-right text-[11px] tracking-wider2 uppercase text-mute leading-relaxed">
           <div>Šest modela</div>
           <div className="text-paper/70 mt-1">U izložbenom prostoru</div>
         </div>

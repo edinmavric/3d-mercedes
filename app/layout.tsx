@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
@@ -20,6 +20,12 @@ export const metadata: Metadata = {
   title: "Mercedes-Benz Novi Pazar — Inženjerska perfekcija",
   description:
     "Salon Mercedes-Benz Novi Pazar. Sedamdeset godina preciznosti — vozila koja redefinišu odnos između čoveka i mašine.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

@@ -29,7 +29,7 @@ export function Performance() {
               Ubrzanje 0–100
             </div>
             <div className="font-display font-light leading-none mt-6">
-              <span className="text-[140px] chrome-text">4,1</span>
+              <span className="text-[clamp(4rem,18vw,7rem)] md:text-[clamp(3rem,10vw,8.75rem)] chrome-text">4,1</span>
               <span className="text-3xl text-mute ml-2">s</span>
             </div>
             <div className="mt-6 text-[12px] text-mute leading-relaxed max-w-xs">
@@ -43,7 +43,7 @@ export function Performance() {
               Maksimalna brzina
             </div>
             <div className="font-display font-light leading-none mt-6">
-              <span className="text-[140px] chrome-text">250</span>
+              <span className="text-[clamp(4rem,18vw,7rem)] md:text-[clamp(3rem,10vw,8.75rem)] chrome-text">250</span>
               <span className="text-3xl text-mute ml-2">km/h</span>
             </div>
             <div className="mt-6 text-[12px] text-mute leading-relaxed max-w-xs">
@@ -57,7 +57,7 @@ export function Performance() {
               Koeficijent otpora
             </div>
             <div className="font-display font-light leading-none mt-6">
-              <span className="text-[140px] chrome-text">0,22</span>
+              <span className="text-[clamp(4rem,18vw,7rem)] md:text-[clamp(3rem,10vw,8.75rem)] chrome-text">0,22</span>
               <span className="text-3xl text-mute ml-2">Cd</span>
             </div>
             <div className="mt-6 text-[12px] text-mute leading-relaxed max-w-xs">
